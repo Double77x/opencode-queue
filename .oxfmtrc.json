@@ -1,0 +1,5 @@
+{
+  "ignorePatterns": ["node_modules", "dist", "bun.lock"],
+  "printWidth": 120,
+  "semicolons": "always"
+}

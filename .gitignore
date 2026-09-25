@@ -1,0 +1,12 @@
+node_modules/
+dist/
+
+# Runtime state written by the plugin
+.opencode/queue.json
+.opencode/queue.json.corrupt-*
+.opencode/autorun.json
+.opencode/queue.json.lock/
+
+*.log
+*.tgz
+.DS_Store
