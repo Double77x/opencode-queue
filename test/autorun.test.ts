@@ -1,14 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import {
+  DEFAULT_BUDGET,
+  MAX_BUDGET,
+  badgeText,
   decideNext,
   freshArming,
   isArmedFor,
+  parseArming,
   statusText,
   toggled,
-  parseArming,
-  DEFAULT_BUDGET,
-  MAX_BUDGET,
 } from "../src/core/autorun.ts";
 import { DONE, PENDING, type Task } from "../src/core/task.ts";
 
@@ -136,5 +137,19 @@ describe("status text", () => {
 
   test("calls out a spent budget", () => {
     assert.match(statusText({ ...freshArming(SESSION), budget: 2, used: 2 }), /budget/);
+  });
+});
+
+describe("sidebar badge", () => {
+  test("is absent when auto-run is off", () => {
+    assert.equal(badgeText(undefined), undefined);
+  });
+
+  test("shows the counter and how to turn it off", () => {
+    assert.equal(badgeText({ ...freshArming(SESSION), budget: 10, used: 0 }), "auto-run 0/10 · /queue-auto off");
+  });
+
+  test("marks a paused run", () => {
+    assert.equal(badgeText({ ...freshArming(SESSION), paused: true }), "auto-run paused · /queue-auto");
   });
 });

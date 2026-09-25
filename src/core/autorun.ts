@@ -103,8 +103,9 @@ export function statusText(arming: Arming | undefined): string {
   return `Auto-run is on. ${remaining(arming)} of ${arming.budget} task turns left. Run /queue-auto to turn it off.`;
 }
 
+/** Shown in the sidebar header while the section is collapsed. */
 export function badgeText(arming: Arming | undefined): string | undefined {
   if (arming === undefined) return undefined;
-  if (arming.paused) return "auto-run paused";
-  return `auto-run ${arming.used}/${arming.budget}`;
+  if (arming.paused) return "auto-run paused · /queue-auto";
+  return `auto-run ${arming.used}/${arming.budget} · /queue-auto off`;
 }
