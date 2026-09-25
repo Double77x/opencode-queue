@@ -1,8 +1,8 @@
 # Regenerates the README demo GIF from a real OpenCode session.
 #
-# Requires vhs, ttyd, ffmpeg and a working OpenCode install with the plugin
-# registered. It spends one real model turn to create the session, so point
-# OPENCODE at a cheap model before running it.
+# Requires vhs, ttyd, ffmpeg, node and a working OpenCode install with the plugin
+# registered. The recording drives a real model, so point OpenCode at a cheap
+# one before running it.
 #
 #   ./script/demo.sh [output.gif]
 #
@@ -15,8 +15,9 @@ set -euo pipefail
 out="${1:-docs/demo.gif}"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 scratch="${TMPDIR:-/tmp}/opencode-queue-demo"
+tasks=2
 
-for bin in vhs ttyd ffmpeg opencode; do
+for bin in vhs ttyd ffmpeg opencode node; do
   command -v "$bin" >/dev/null || { echo "$bin not found on PATH" >&2; exit 1; }
 done
 
@@ -29,10 +30,10 @@ cd "$scratch"
 # recording would then show "Auto-run off" while claiming to arm it.
 rm -f .opencode/queue.json .opencode/autorun.json
 
-# Create the session outside the recording. Doing it here rather than by typing
-# "hi" into the TUI keeps the model's turn, and its reasoning block, out of the
-# GIF, and removes ~15s of dead time.
-opencode run "Reply with exactly the word READY and nothing else." >/dev/null
+# Create the session outside the recording, against a throwaway project so the
+# capture never inherits another run's transcript. Typing "hi" into the TUI
+# instead would put a model turn and its reasoning block in the GIF.
+opencode run --standalone "Reply with exactly the word READY and nothing else." >/dev/null
 session="$(opencode session list | head -n1 | awk '{print $1}')"
 [ -n "$session" ] || { echo "could not determine session id" >&2; exit 1; }
 
@@ -50,51 +51,50 @@ Hide
 Type "opencode --session $session"
 Enter
 Show
-Sleep 8s
+Sleep 9s
 
 Type "/queue-add"
 Enter
 Sleep 1200ms
-Type "Document the queue store locking model"
+Type "Reply with PONG"
 Enter
 Sleep 1200ms
 
 Type "/queue-add"
 Enter
 Sleep 1200ms
-Type "Add a regression test for the file watcher"
-Enter
-Sleep 2s
-
-Type "/queue-list"
-Enter
-Sleep 2s
-
-Type "/queue-done"
-Enter
-Sleep 1200ms
+Type "Reply with PONG again"
 Enter
 Sleep 2s
 
 Type "/queue-auto"
 Enter
-Sleep 2s
+Sleep 17s
 
 Type "/queue-auto-status"
 Enter
-Sleep 2s
+Sleep 2500ms
 Enter
-Sleep 1500ms
+Sleep 2s
 TAPE
 
 vhs demo.tape >/dev/null
 
-# Fail loudly if the run did not actually arm, rather than shipping a GIF that
-# contradicts itself.
-[ -f .opencode/autorun.json ] || {
-  echo "auto-run was not armed during the recording; refusing to publish" >&2
-  exit 1
-}
+# The whole point of the capture is that the agent drains the queue on its own.
+# Publish only if that actually happened, rather than shipping a GIF that shows
+# a dead run. Auto-run went years without ever firing, and the tests could not
+# see it, so check the real artefacts.
+node -e '
+const fs = require("node:fs");
+const queue = JSON.parse(fs.readFileSync(".opencode/queue.json", "utf8"));
+const arming = JSON.parse(fs.readFileSync(".opencode/autorun.json", "utf8"));
+const fail = (why) => { console.error(`refusing to publish: ${why}`); process.exit(1); };
+if (queue.length === 0) fail("the queue is empty");
+if (queue.some((task) => task.status !== "done")) fail("a task was never completed");
+if (arming.paused) fail("the run paused");
+if (arming.used !== queue.length) fail(`expected ${queue.length} pushes, saw ${arming.used}`);
+if (arming.activeID !== "") fail("a task is still active");
+'
 
 mkdir -p "$(dirname "$here/$out")"
 # -ss 6.8 drops the shell prompt and the TUI splash. crop=1400:428 drops the

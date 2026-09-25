@@ -47,8 +47,9 @@ Nothing is ever submitted for you, and the agent cannot read your queue unless y
 
 ## Auto-run
 
-`/queue-auto` lets the agent work through the queue unattended. When the session goes idle the plugin hands it the next
-task, the agent calls `queue_done` when it finishes, and the next one follows.
+`/queue-auto` lets the agent work through the queue unattended. Arming starts the run straight away, and again after
+every task: the agent is handed the next one, calls `queue_done` when it finishes, and the one after that follows. The
+GIF above is that loop, recorded live.
 
 ```sh
 /queue-auto          # arm for this session
@@ -116,9 +117,12 @@ work in the same project without losing each other's writes. A file that cannot 
 - **`/queue-run` cannot prefill the composer.** OpenCode 2 has no public API for putting text into the native composer,
   so the command picks a task and stops. Tracked at
   [anomalyco/opencode#51209](https://github.com/anomalyco/opencode/issues/51209).
-- **`session.idle` cannot tell "finished" from "waiting for you".** A task the agent declines pauses the run rather than
-  being retried.
+- **A finished turn cannot tell "done" from "waiting for you".** The plugin reacts to the end of a model turn, which
+  looks the same whether the agent finished the task or stopped to ask. A task that is handed over and never ticked off
+  pauses the run instead of being retried.
 - **Auto-run is one session at a time.** Arming a second session replaces the first.
+- **An armed run only picks up tasks that were queued before it started.** A task added to an already-armed queue waits
+  until that run finishes and you arm again.
 
 ## Development
 
