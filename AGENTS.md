@@ -5,7 +5,7 @@ Guidance for coding agents working in this repository. Read it before changing c
 ## What this is
 
 `opencode-queue` is a task queue the **user** owns for an OpenCode 2 session, which the agent may be allowed to drain
-one task at a time. It is not a fork of anything, and it is not a model-owned todo list.
+one task at a time. It is not a model-owned todo list.
 
 ## Hard product rules
 
