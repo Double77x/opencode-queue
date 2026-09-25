@@ -29,6 +29,8 @@ type Section = {
   title: string;
   count: number;
   expanded: boolean;
+  /** Short state summary shown in the header, but only while collapsed. */
+  badge?: string | undefined;
   onToggle: () => void;
   empty: string;
   children?: JSX.Element;
@@ -45,6 +47,9 @@ function Disclosure(props: Section) {
           <b>{props.title}</b>
         </text>
         <box flexGrow={1} />
+        <Show when={!props.expanded && props.badge !== undefined} keyed>
+          {(text: string) => <text fg={plugin.theme.text.feedback.warning.default}>{text}</text>}
+        </Show>
         <text fg={countColor()}>{props.count}</text>
       </box>
       <Show when={props.expanded}>
@@ -86,14 +91,10 @@ export function QueueSection(props: {
         title="My Queue"
         count={mine().length}
         expanded={props.view.queueExpanded}
+        badge={badge()}
         onToggle={props.onToggleQueue}
         empty="No tasks"
       >
-        <Show when={badge()} keyed>
-          {(text: string) => (
-            <text fg={plugin.theme.text.feedback.warning.default}>{text} · /queue-auto to turn off</text>
-          )}
-        </Show>
         <For each={position(mine())}>
           {(entry) => {
             const done = () => entry.task.status === DONE;

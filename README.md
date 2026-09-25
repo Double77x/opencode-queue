@@ -93,8 +93,9 @@ Every command is also in the command palette.
 
 Two collapsible sections:
 
-- **My Queue** — this session's tasks, newest last, completed ones dimmed and struck through, with a live count and an
-  `auto-run used/budget` badge while a run is armed.
+- **My Queue** — this session's tasks, newest last, completed ones dimmed and struck through, with a live count. While
+  collapsed, the header carries a badge such as `auto-run 0/10 · /queue-auto off`, matching how OpenCode's own MCP
+  section summarises itself.
 - **Stashed requests** — prompts you already sent that the agent has not picked up yet. Auto-run drains your _queue_, not
   the OpenCode inbox, so this is the only signal that a message of yours is stuck.
 
