@@ -121,8 +121,10 @@ work in the same project without losing each other's writes. A file that cannot 
   looks the same whether the agent finished the task or stopped to ask. A task that is handed over and never ticked off
   pauses the run instead of being retried.
 - **Auto-run is one session at a time.** Arming a second session replaces the first.
-- **An armed run only picks up tasks that were queued before it started.** A task added to an already-armed queue waits
-  until that run finishes and you arm again.
+- **Adding a task is not a trigger.** Arming is not a one-off unlock either: the run stays armed until you switch it
+  off, and it keeps reacting to the end of every turn. So a task you add later is picked up by whatever runs next in that
+  session, including a message you send yourself. It only sits there if you add a task and then do nothing at all, since
+  adding one is not itself a turn.
 
 ## Development
 
