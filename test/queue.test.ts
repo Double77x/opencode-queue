@@ -226,18 +226,48 @@ describe("cross-process safety", () => {
 });
 
 describe("subscribe", () => {
-  test("observes an external change and cleans up idempotently", async () => {
+  test("observes a change even when the queue file did not exist yet", async () => {
+    // A fresh project has no .opencode directory at all. Watching the file
+    // directly would fail here and the sidebar would never update.
     const seen: number[] = [];
     const stop = subscribe(
       worktree,
       (tasks) => seen.push(tasks.length),
       () => undefined,
     );
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    await add(worktree, A, "later");
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await add(worktree, A, "first");
     await new Promise((resolve) => setTimeout(resolve, 400));
+    assert.deepEqual(seen, [0, 1], `expected the watcher to report the new task, saw ${seen.join(",")}`);
+    stop();
+  });
+
+  test("observes rapid writes, coalescing intermediate states", async () => {
+    const seen: number[] = [];
+    const stop = subscribe(
+      worktree,
+      (tasks) => seen.push(tasks.length),
+      () => undefined,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await add(worktree, A, "first");
+    await add(worktree, A, "second");
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    // The watcher debounces, so intermediate counts may be skipped. What matters
+    // is that the final state is observed, not that every write is reported.
+    assert.equal(seen[0], 0, "expected an initial empty read");
+    assert.equal(seen.at(-1), 2, `expected to settle on 2 tasks, saw ${seen.join(",")}`);
+    stop();
+  });
+
+  test("cleans up idempotently", async () => {
+    const stop = subscribe(
+      worktree,
+      () => undefined,
+      () => undefined,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
     stop();
     stop();
-    assert.ok(seen.length >= 1);
   });
 });

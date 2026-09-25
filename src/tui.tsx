@@ -45,6 +45,8 @@ export default Plugin.define({
 
     const refreshArming = async () => setArming(await readArming(worktree));
     void refreshArming();
+    const refreshItems = async () => setTasks(await queue.loadAll(worktree));
+    void refreshItems();
     const unsubscribe = queue.subscribe(
       worktree,
       (next) => {
@@ -57,9 +59,13 @@ export default Plugin.define({
     const toast = (variant: "success" | "info" | "error", message: string) =>
       context.ui.toast.show({ variant, message });
 
+    // Every mutation goes through here, so re-reading on success keeps the
+    // sidebar in step with our own writes rather than waiting on the watcher.
     async function safely(work: () => Promise<unknown>, onSuccess: () => void) {
       try {
         await work();
+        await refreshItems();
+        await refreshArming();
         onSuccess();
       } catch (error) {
         toast("error", `Queue: ${errorText(error)}`);
