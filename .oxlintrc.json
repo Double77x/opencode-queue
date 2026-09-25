@@ -25,6 +25,12 @@
       "rules": {
         "no-await-in-loop": "off"
       }
+    },
+    {
+      "files": ["test/package.test.ts"],
+      "rules": {
+        "no-await-in-loop": "off"
+      }
     }
   ]
 }
