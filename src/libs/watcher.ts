@@ -14,6 +14,7 @@ export function watchFile(file: string, onChange: () => void): () => void {
   const target = path.basename(file);
   let timer: NodeJS.Timeout | undefined;
   let watcher: FSWatcher | undefined;
+  let stopped = false;
 
   const fire = () => {
     if (timer) clearTimeout(timer);
@@ -23,6 +24,10 @@ export function watchFile(file: string, onChange: () => void): () => void {
   const attach = async () => {
     try {
       await mkdir(directory, { recursive: true });
+      // attach is async, so a caller can stop us before the watch exists. Without
+      // this the handle is created after cleanup and never closed, which leaks a
+      // watcher on every plugin teardown and hangs the test runner.
+      if (stopped) return;
       watcher = watch(directory, { persistent: false }, (_event, changed) => {
         if (changed === target || changed === null) fire();
       });
@@ -35,6 +40,7 @@ export function watchFile(file: string, onChange: () => void): () => void {
   void attach();
 
   return () => {
+    stopped = true;
     if (timer) clearTimeout(timer);
     watcher?.close();
   };

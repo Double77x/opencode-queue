@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { freshArming, type Arming } from "../src/core/autorun.ts";
 import { add, complete, load } from "../src/stores/queue.ts";
 import { readArming, writeArming } from "../src/stores/autorun.ts";
-import plugin from "../src/server.ts";
+import plugin, { TURN_FINISHED } from "../src/server.ts";
 
 const A = "ses_aaa";
 const B = "ses_bbb";
@@ -93,11 +95,15 @@ async function callTool(name: string, sessionID: string): Promise<string> {
   return (await tool.execute(undefined, { sessionID })).content;
 }
 
-function idle(sessionID: string, directory: string | undefined = worktree) {
+/**
+ * OpenCode emits execution events with no location at all, so neither do these.
+ * A fabricated `session.idle` is what let a dead event name pass 96 green tests.
+ */
+function finished(sessionID: string, directory?: string) {
   return {
     id: `e_${sessionID}`,
     created: Date.now(),
-    type: "session.idle",
+    type: TURN_FINISHED,
     location: directory === undefined ? undefined : { directory },
     data: { sessionID },
   };
@@ -117,6 +123,25 @@ async function armFor(sessionID: string, overrides: Partial<Arming> = {}): Promi
   await writeArming(worktree, { ...freshArming(sessionID), ...overrides });
 }
 
+const eventTypes = (): string => {
+  const entry = fileURLToPath(import.meta.resolve("@opencode/protocol/groups/event"));
+  return readFileSync(entry.replace(/\.js$/, ".d.ts"), "utf8");
+};
+
+/** Leaves the plugin live so the arming file can be written underneath it. */
+async function armLive(): Promise<Registered & { stop: () => Promise<void> }> {
+  const { settled, subscribe } = drain();
+  const { context, registered } = contextFor(subscribe);
+  const cleanup = await plugin.setup(context as never);
+  await settled;
+  return {
+    ...registered,
+    stop: () => Promise.resolve(typeof cleanup === "function" ? cleanup() : undefined),
+  };
+}
+
+const settle = () => new Promise((resolve) => setTimeout(resolve, 500));
+
 describe("server plugin registration", () => {
   test("registers both agent tools and the session context hook", async () => {
     const registered = await run();
@@ -128,24 +153,24 @@ describe("server plugin registration", () => {
 describe("auto-run stays silent until armed", () => {
   test("does not prompt when there is no arming", async () => {
     await add(worktree, A, "a1");
-    assert.deepEqual((await run(idle(A))).prompts, []);
+    assert.deepEqual((await run(finished(A))).prompts, []);
   });
 
   test("does not prompt a session that did not opt in", async () => {
     await add(worktree, B, "b1");
     await armFor(A);
-    assert.deepEqual((await run(idle(B))).prompts, []);
+    assert.deepEqual((await run(finished(B))).prompts, []);
   });
 
-  test("does not prompt for an idle event from another location", async () => {
+  test("does not prompt for a finished turn from another location", async () => {
     await add(worktree, A, "a1");
     await armFor(A);
-    assert.deepEqual((await run(idle(A, OTHER))).prompts, []);
+    assert.deepEqual((await run(finished(A, OTHER))).prompts, []);
   });
 
   test("does not prompt when the queue is empty", async () => {
     await armFor(A);
-    assert.deepEqual((await run(idle(A))).prompts, []);
+    assert.deepEqual((await run(finished(A))).prompts, []);
   });
 });
 
@@ -154,7 +179,7 @@ describe("auto-run drives the queue in order", () => {
     await add(worktree, A, "first");
     await add(worktree, A, "second");
     await armFor(A);
-    const registered = await run(idle(A));
+    const registered = await run(finished(A));
     assert.equal(registered.prompts.length, 1);
     const prompt = registered.prompts[0] as { sessionID: string; text: string };
     assert.equal(prompt.sessionID, A);
@@ -165,7 +190,7 @@ describe("auto-run drives the queue in order", () => {
   test("records the pushed task and spends one unit of budget", async () => {
     await add(worktree, A, "first");
     await armFor(A);
-    await run(idle(A));
+    await run(finished(A));
     const arming = await readArming(worktree);
     assert.equal(arming?.used, 1);
     assert.equal(arming?.activeID.length, 12);
@@ -175,14 +200,56 @@ describe("auto-run drives the queue in order", () => {
     const first = await add(worktree, A, "first");
     await add(worktree, A, "second");
     await armFor(A, { used: 1, activeID: first.id });
-    assert.deepEqual((await run(idle(A))).prompts, []);
+    assert.deepEqual((await run(finished(A))).prompts, []);
     assert.equal((await readArming(worktree))?.paused, true);
   });
 
   test("prompts nothing once the budget is spent", async () => {
     await add(worktree, A, "first");
     await armFor(A, { used: 10 });
-    assert.deepEqual((await run(idle(A))).prompts, []);
+    assert.deepEqual((await run(finished(A))).prompts, []);
+  });
+});
+
+describe("host protocol", () => {
+  test("the event auto-run waits for is one OpenCode actually emits", () => {
+    assert.ok(eventTypes().includes(`"${TURN_FINISHED}"`), `${TURN_FINISHED} is not an event in @opencode/protocol`);
+  });
+
+  // There is no unit test for "OpenCode never emits session.idle", because that
+  // is a host fact, not a code fact. It was verified by subscribing to every
+  // event across a completed turn plus 55s of an idle TUI: only
+  // session.execution.succeeded arrives. session.idle is still declared in the
+  // protocol types, which is precisely why listening for it fails silently.
+});
+
+describe("arming starts the run", () => {
+  test("pushes the first task when a run is armed while the session is idle", async () => {
+    await add(worktree, A, "first");
+    await add(worktree, A, "second");
+    const live = await armLive();
+    await writeArming(worktree, freshArming(A));
+    await settle();
+    await live.stop();
+    assert.equal(live.prompts.length, 1);
+    const prompt = live.prompts[0] as { sessionID: string; text: string };
+    assert.equal(prompt.sessionID, A);
+    assert.match(prompt.text, /first/);
+  });
+
+  test("does not mistake its own bookkeeping write for a fresh arming", async () => {
+    await add(worktree, A, "first");
+    await add(worktree, A, "second");
+    const live = await armLive();
+    await writeArming(worktree, freshArming(A));
+    await settle();
+    await live.stop();
+    // The push records activeID, which is another arming write. Treating that
+    // as a new arming would read the active task as "never finished" and pause.
+    assert.equal(live.prompts.length, 1);
+    const arming = await readArming(worktree);
+    assert.equal(arming?.paused, false);
+    assert.equal(arming?.used, 1);
   });
 });
 

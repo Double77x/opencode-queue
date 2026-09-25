@@ -41,6 +41,17 @@ These are host behaviours, not preferences. Do not "simplify" past them.
   `dispatch(id, input)`. An earlier note in this repo claimed otherwise; that was wrong.
 - **Accordion state must not render from `context.storage`.** The host commits that store only after a cross-process
   lock and an fsynced write, so a click looks dead. Render from a local `createSignal` and persist in the background.
+- **There is no `session.idle` event. Do not wait for one.** It is still declared in `@opencode/protocol`, so the type
+  checks and the tests pass, but the host never emits it. Verified by subscribing to every event across a completed turn
+  plus 55s of an idle TUI: the turn ends with `session.execution.succeeded` and nothing after it. `src/server.ts` listens
+  for `TURN_FINISHED`, and a test pins that name against the protocol package so it cannot rot again.
+  This cost a long time: auto-run had never once run, and 96 green tests asserted against a fabricated event.
+- **Only the server plugin can push a prompt.** The TUI context has no `session.prompt`, only `ui.dialog.prompt`. Anything
+  that must submit work to the agent has to live in `server.ts`.
+- **A finished turn is the only safe drain trigger, and it is not enough on its own.** Arming writes a file; a slash
+  command causes no model turn, so an armed run would sit dormant. `server.ts` also watches `autorun.json` and kicks on a
+  _change of armed session_ only, seeded from the file at startup. Comparing the armed session rather than every write is
+  what stops the plugin's own bookkeeping from reading the active task as unfinished and pausing the run it just started.
 
 ## Layout
 

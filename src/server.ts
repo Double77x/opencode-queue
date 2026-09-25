@@ -1,11 +1,23 @@
+import { join } from "node:path";
 import { Plugin } from "@opencode/plugin";
 import { type Arming, decideNext, describeStop, isArmedFor } from "./core/autorun.ts";
 import { PENDING } from "./core/task.ts";
+import { watchFile } from "./libs/watcher.ts";
 import { readArming, writeArming } from "./stores/autorun.ts";
 import { clearSession, complete, load, loadAll } from "./stores/queue.ts";
 
 const DONE_TOOL = "queue_done";
 const LIST_TOOL = "queue_list";
+
+/**
+ * A finished turn. OpenCode has no `session.idle` event: the real names are
+ * `session.execution.succeeded`, `.failed` and `.interrupted`. Only a normal
+ * finish counts, because a failed turn leaves the active task unfinished and
+ * the no-re-push guard must stop the run rather than retry it.
+ */
+export const TURN_FINISHED = "session.execution.succeeded";
+
+const ARMING_FILE = ".opencode/autorun.json";
 
 const NO_INPUT = { type: "object", properties: {}, additionalProperties: false } as const;
 
@@ -66,7 +78,7 @@ export default Plugin.define({
       return [`Queue: ${pending} pending of ${tasks.length}.`, ...lines].join("\n");
     };
 
-    const onIdle = async (sessionID: string) => {
+    const onTurnFinished = async (sessionID: string) => {
       if (pushing.has(sessionID)) return;
       pushing.add(sessionID);
       try {
@@ -93,6 +105,37 @@ export default Plugin.define({
       }
     };
 
+    /**
+     * Arming a run has to start it. The only other trigger is a finished turn,
+     * so a user who arms a queue while the session sits idle would otherwise
+     * wait forever for the agent to spontaneously finish something. Only a
+     * change of armed session counts, so the plugin's own bookkeeping writes
+     * cannot be mistaken for a new arming and pause the run they just started.
+     * The seed matters for the same reason: without it the first push would
+     * look like the first arming.
+     */
+    let armedSession: string | undefined;
+    const seeded = readArming(worktree).then(
+      (arming) => {
+        armedSession = arming?.sessionID;
+      },
+      () => undefined,
+    );
+    const reconcile = async () => {
+      await seeded;
+      try {
+        const arming = await readArming(worktree);
+        const next = arming?.sessionID;
+        if (next === armedSession) return;
+        armedSession = next;
+        if (next === undefined) return;
+        await onTurnFinished(next);
+      } catch (error) {
+        console.error("[opencode-queue] could not reconcile auto-run", error);
+      }
+    };
+    const stopWatching = watchFile(join(worktree, ARMING_FILE), () => void reconcile());
+
     const events = (async () => {
       try {
         for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
@@ -105,7 +148,7 @@ export default Plugin.define({
             if (arming?.sessionID === event.data.sessionID) await writeArming(worktree, undefined);
             continue;
           }
-          if (event.type === "session.idle") await onIdle(event.data.sessionID);
+          if (event.type === TURN_FINISHED) await onTurnFinished(event.data.sessionID);
         }
       } catch (error) {
         if (!controller.signal.aborted) console.error("[opencode-queue] event stream failed", error);
@@ -140,6 +183,7 @@ export default Plugin.define({
 
     return async () => {
       controller.abort();
+      stopWatching();
       await events;
       await reload;
       for (const registration of await Promise.all([tool, context])) await registration.dispose();
